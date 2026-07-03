@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Scan History') }} - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2>{{ _('Scan History') }}</h2>
+        <p class="text-muted">{{ _('Search and review recorded scan activity.') }}</p>
+    </div>
+</div>
+
+<form method="GET" class="mb-4">
+    <div class="input-group">
+        <input
+            type="text"
+            name="search"
+            class="form-control"
+            placeholder="{{ _('Search by scan type or target...') }}"
+            value="{{ search }}">
+        <button class="btn btn-primary" type="submit">{{ _('Search') }}</button>
+    </div>
+</form>
+
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>{{ _('ID') }}</th>
+                <th>{{ _('Type') }}</th>
+                <th>{{ _('Target') }}</th>
+                <th>{{ _('Date') }}</th>
+                <th>{{ _('Result') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if records %}
+                {% for row in records %}
+                <tr>
+                    <td>{{ row[0] }}</td>
+                    <td>{{ row[1] }}</td>
+                    <td>{{ row[2] }}</td>
+                    <td>{{ row[4] }}</td>
+                    <td>{{ row[3] }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5" class="text-center">{{ _('No scan history found.') }}</td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Integrity Monitor') }} - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-7">
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="card-title mb-4">{{ _('File Integrity Monitor') }}</h2>
+                <form method="POST" class="input-group mb-3">
+                    <input type="text" name="filename" class="form-control" placeholder="app.py" required>
+                    <button class="btn btn-danger" type="submit">{{ _('Generate Hash') }}</button>
+                </form>
+                {% if file_hash %}
+                <div class="mt-3">
+                    <h5>{{ _('SHA256 Hash') }}</h5>
+                    <textarea class="form-control" rows="4" readonly>{{ file_hash }}</textarea>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

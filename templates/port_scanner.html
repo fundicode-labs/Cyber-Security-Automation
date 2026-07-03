@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Port Scanner') }} - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="card-title mb-4">{{ _('Port Scanner') }}</h2>
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+                <form method="POST" class="row g-3">
+                    <div class="col-9">
+                        <input type="text" name="host" class="form-control" placeholder="127.0.0.1" required>
+                    </div>
+                    <div class="col-3">
+                        <button type="submit" class="btn btn-primary w-100">{{ _('Scan') }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% if results %}
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-3">{{ _('Scan Results') }}</h5>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>{{ _('Port') }}</th>
+                                <th>{{ _('Status') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for port, status in results.items() %}
+                            <tr>
+                                <td>{{ port }}</td>
+                                <td>{{ status }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

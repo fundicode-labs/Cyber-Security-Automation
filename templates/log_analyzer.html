@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Log Analyzer') }} - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-7">
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="card-title mb-4">{{ _('Log Analyzer') }}</h2>
+                <form method="POST" class="input-group mb-3">
+                    <input type="text" name="logfile" class="form-control" placeholder="sample.log" required>
+                    <button class="btn btn-secondary" type="submit">{{ _('Analyze') }}</button>
+                </form>
+                {% if results %}
+                <div class="mt-3">
+                    <h5>{{ _('Analysis Results') }}</h5>
+                    <ul class="list-group">
+                        {% for result in results %}
+                        <li class="list-group-item">{{ result }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

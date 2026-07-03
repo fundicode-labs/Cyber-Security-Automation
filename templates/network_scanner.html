@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Network Scanner') }} - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="card-title mb-4">{{ _('Network Scanner') }}</h2>
+                <form method="POST" class="row g-3">
+                    <div class="col-md-9">
+                        <input type="text" name="network" class="form-control" placeholder="192.168.1.0/24" required>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-success w-100" type="submit">{{ _('Scan Network') }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-3">{{ _('Discovered Devices') }}</h5>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>{{ _('IP Address') }}</th>
+                                <th>{{ _('MAC Address') }}</th>
+                                <th>{{ _('Hostname') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if devices %}
+                                {% for device in devices %}
+                                <tr>
+                                    <td>{{ device.ip }}</td>
+                                    <td>{{ device.mac }}</td>
+                                    <td>{{ device.hostname }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="3" class="text-center">{{ _('No devices found.') }}</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

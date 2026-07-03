@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Dashboard') }} - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>{{ _('Security Dashboard') }}</h2>
+        <p class="text-muted">{{ _('Overview of scan activity and quick access to tools.') }}</p>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card border-primary shadow-sm">
+            <div class="card-body">
+                <h3 class="card-title">{{ total_scans }}</h3>
+                <p class="card-text mb-0">{{ _('Total scans recorded') }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-success shadow-sm">
+            <div class="card-body">
+                <h3 class="card-title">{{ stats|length }}</h3>
+                <p class="card-text mb-0">{{ _('Scan types tracked') }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-secondary shadow-sm">
+            <div class="card-body">
+                <h3 class="card-title">{{ recent_scans|length }}</h3>
+                <p class="card-text mb-0">{{ _('Recent scan entries') }}</p>
+            </div>
+        </div>
+    </div>
+    {% if current_user.role == 'admin' %}
+    <div class="col-md-3">
+        <div class="card border-warning shadow-sm">
+            <div class="card-body">
+                <h3 class="card-title">{{ total_users }}</h3>
+                <p class="card-text mb-0">{{ _('Total users') }}</p>
+                <small class="text-muted">{{ new_users_last_30 }} {{ _('new in 30d') }}</small>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<h4 class="mb-3">{{ _('Modules') }}</h4>
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-md-3">
+        <a href="/port" class="btn btn-primary w-100">{{ _('Port Scanner') }}</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/network" class="btn btn-success w-100">{{ _('Network Scanner') }}</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/password" class="btn btn-warning w-100">{{ _('Password Checker') }}</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/logs" class="btn btn-secondary w-100">{{ _('Log Analyzer') }}</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/integrity" class="btn btn-danger w-100">{{ _('Integrity Monitor') }}</a>
+    </div>
+    {% if current_user.role == "admin" %}
+    <div class="col-sm-6 col-md-3">
+        <a href="/users" class="btn btn-dark w-100">{{ _('User Management') }}</a>
+    </div>
+    {% endif %}
+    <div class="col-sm-6 col-md-3">
+        <a href="/history" class="btn btn-info w-100">{{ _('Scan History') }}</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/report" class="btn btn-outline-secondary w-100">{{ _('Export PDF') }}</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/change_password" class="btn btn-outline-warning w-100">{{ _('Change Password') }}</a>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">{{ _('Scan Statistics') }}</h5>
+                <canvas id="scanChart" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h5 class="card-title mb-3">{{ _('Recent Activity') }}</h5>
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Type') }}</th>
+                        <th>{{ _('Target') }}</th>
+                        <th>{{ _('Date') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in recent_scans %}
+                    <tr>
+                        <td>{{ row[0] }}</td>
+                        <td>{{ row[1] }}</td>
+                        <td>{{ row[2] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const labels = {{ stats|map(attribute=0)|list|tojson }};
+const values = {{ stats|map(attribute=1)|list|tojson }};
+const ctx = document.getElementById("scanChart");
+new Chart(ctx, {
+    type: "bar",
+    data: {
+        labels: labels,
+        datasets: [{
+            label: "{{ _('Number of Scans') }}",
+            data: values,
+            backgroundColor: "rgba(54, 162, 235, 0.6)",
+            borderColor: "rgba(54, 162, 235, 1)",
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: { beginAtZero: true }
+        }
+    }
+});
+</script>
+{% endblock %}

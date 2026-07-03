@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Users') }} - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+
+<h2>{{ _('User Management') }}</h2>
+
+<a href="/add_user" class="btn btn-success mb-3">
+    {{ _('Add User') }}
+</a>
+
+<table class="table table-bordered">
+
+<tr>
+    <th>{{ _('ID') }}</th>
+    <th>{{ _('Username') }}</th>
+    <th>{{ _('Email') }}</th>
+    <th>{{ _('Role') }}</th>
+    <th>{{ _('Action') }}</th>
+</tr>
+
+{% for user in records %}
+<tr>
+    <td>{{ user[0] }}</td>
+    <td>{{ user[1] }}</td>
+    <td>{{ user[2] }}</td>
+    <td>{{ user[3] }}</td>
+    <td>
+        <a href="/delete_user/{{ user[0] }}"
+           class="btn btn-danger btn-sm">
+            {{ _('Delete') }}
+        </a>
+    </td>
+</tr>
+{% endfor %}
+
+</table>
+
+{% endblock %}
