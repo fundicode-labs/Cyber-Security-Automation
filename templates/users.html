@@ -4,13 +4,14 @@
 
 {% block content %}
 
-<h2>{{ _('User Management') }}</h2>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>{{ _('User Management') }}</h2>
+    <a href="/add_user" class="btn btn-success">
+        {{ _('Add User') }}
+    </a>
+</div>
 
-<a href="/add_user" class="btn btn-success mb-3">
-    {{ _('Add User') }}
-</a>
-
-<table class="table table-bordered">
+<table class="table table-bordered table-striped align-middle">
 
 <tr>
     <th>{{ _('ID') }}</th>

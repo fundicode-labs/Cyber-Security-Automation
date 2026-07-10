@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Gateway Health - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Payment Gateway Health</h2>
+    <a href="/payments" class="btn btn-outline-secondary btn-sm">Back to Payments</a>
+</div>
+
+<div class="alert alert-info">
+    Live callback tolerance: <strong>{{ webhook_tolerance }}</strong> seconds.
+    For production, prefer environment variables (CSA_*) for API keys and webhook secrets.
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive table-soft p-2">
+            <table class="table table-striped align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Provider</th>
+                        <th>Endpoint</th>
+                        <th>API Key</th>
+                        <th>Webhook Secret</th>
+                        <th>Config Source</th>
+                        <th>Allowed IPs</th>
+                        <th>Last Callback</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in gateways %}
+                    <tr>
+                        <td class="text-capitalize">{{ item.provider }}</td>
+                        <td class="small">{{ item.endpoint or '-' }}</td>
+                        <td>
+                            {% if item.has_api_key %}
+                            <span class="badge bg-success">Configured</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">Missing</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.has_webhook_secret %}
+                            <span class="badge bg-success">Configured</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">Missing</span>
+                            {% endif %}
+                        </td>
+                        <td class="small">
+                            Endpoint: {% if item.endpoint_from_env %}ENV{% else %}DB{% endif %}<br>
+                            API Key: {% if item.api_key_from_env %}ENV{% else %}DB{% endif %}<br>
+                            Secret: {% if item.webhook_secret_from_env %}ENV{% else %}DB{% endif %}
+                        </td>
+                        <td class="small">{{ item.allowed_ips or 'Any' }}</td>
+                        <td class="small">
+                            {% if item.last_event %}
+                            Ref {{ item.last_event.reference }} | {{ item.last_event.status }} | {{ item.last_event.source_ip }} | {{ item.last_event.created_at }}
+                            {% else %}
+                            No callbacks yet
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

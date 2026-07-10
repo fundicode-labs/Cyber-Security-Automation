@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: cybersecurity-automation
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install --upgrade pip; pip install -r requirements-docker.txt
+    startCommand: gunicorn -b 0.0.0.0:$PORT app:app
+    healthCheckPath: /login
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: CSA_MIXBYYAS_ENDPOINT
+        sync: false
+      - key: CSA_MIXBYYAS_API_KEY
+        sync: false
+      - key: CSA_MIXBYYAS_WEBHOOK_SECRET
+        sync: false
+      - key: CSA_MIXBYYAS_ALLOWED_IPS
+        sync: false
+      - key: CSA_HALOPESA_ENDPOINT
+        sync: false
+      - key: CSA_HALOPESA_API_KEY
+        sync: false
+      - key: CSA_HALOPESA_WEBHOOK_SECRET
+        sync: false
+      - key: CSA_HALOPESA_ALLOWED_IPS
+        sync: false
+      - key: CSA_PAYMENT_WEBHOOK_TOLERANCE_SECONDS
+        value: "300"

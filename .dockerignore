@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.venv
+venv
+backups
+reports
+report.pdf
+scan_report.pdf
+database.db-journal

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Email Alerts - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h2>Email Alerts</h2>
+        <p class="text-muted">Configure SMTP and send a test alert.</p>
+        <form method="post" class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">SMTP Server</label>
+                <input class="form-control" name="smtp_server" value="{{ smtp_server }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">SMTP Port</label>
+                <input class="form-control" name="smtp_port" value="{{ smtp_port }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Sender Email</label>
+                <input class="form-control" type="email" name="smtp_email" value="{{ smtp_email }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">SMTP Password</label>
+                <input class="form-control" type="password" name="smtp_password" placeholder="Leave blank to keep current value">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Recipients</label>
+                <input class="form-control" name="recipients" placeholder="ops@example.com, admin@example.com">
+            </div>
+            <div class="col-12">
+                <label class="form-label">Subject</label>
+                <input class="form-control" name="subject" value="Cyber Security Alert">
+            </div>
+            <div class="col-12">
+                <label class="form-label">Message</label>
+                <textarea class="form-control" name="body" rows="5">Test alert from Cyber Security Automation.</textarea>
+            </div>
+            <div class="col-12 text-end">
+                <button type="submit" class="btn btn-danger">Send Test Alert</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

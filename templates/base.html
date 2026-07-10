@@ -1,13 +1,14 @@
 <!DOCTYPE html>
-<html lang="{{ current_language }}">
+<html lang="{{ current_language }}" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{{ _('Cyber Security Automation') }}{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/app.css" rel="stylesheet">
 </head>
-<body class="bg-light">
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+<body class="app-body">
+<nav class="navbar navbar-expand-lg navbar-dark app-navbar">
     <div class="container-fluid">
         <a class="navbar-brand" href="/">{{ _('Cyber Security Automation') }}</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
@@ -23,16 +24,49 @@
                     <a class="nav-link" href="/history">{{ _('History') }}</a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link" href="/backup">Backup</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/api">API</a>
+                </li>
+                {% if current_user.is_authenticated and user_can('payments.view') %}
+                <li class="nav-item">
+                    <a class="nav-link" href="/payments">Payments</a>
+                </li>
+                {% endif %}
+                {% if current_user.is_authenticated %}
+                <li class="nav-item">
+                    <a class="nav-link" href="/notifications">
+                        Notifications
+                        {% if notification_count %}
+                        <span class="badge bg-danger ms-1">{{ notification_count }}</span>
+                        {% endif %}
+                    </a>
+                </li>
+                {% endif %}
+                {% if current_user.is_authenticated and is_management_role(current_user.role) %}
+                <li class="nav-item">
+                    <a class="nav-link" href="/audit">Audit</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/settings">Settings</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/email-alerts">Email Alerts</a>
+                </li>
+                {% endif %}
+                <li class="nav-item">
                     <a class="nav-link" href="/report">{{ _('Export PDF') }}</a>
                 </li>
-                {% if current_user.is_authenticated and current_user.role == 'admin' %}
+                {% if current_user.is_authenticated and is_management_role(current_user.role) %}
                 <li class="nav-item">
                     <a class="nav-link" href="/users">{{ _('Users') }}</a>
                 </li>
                 {% endif %}
             </ul>
-            <div class="d-flex align-items-center">
-                <div class="dropdown me-3">
+            <div class="d-flex align-items-center flex-wrap gap-2 mt-3 mt-lg-0">
+                <button id="themeToggle" class="btn btn-outline-light btn-sm me-2" type="button" aria-label="Toggle dark mode">Dark</button>
+                <div class="dropdown me-2">
                     <button class="btn btn-secondary btn-sm dropdown-toggle" type="button" id="langMenu" data-bs-toggle="dropdown" aria-expanded="false">
                         {{ available_languages[current_language] }}
                     </button>
@@ -73,5 +107,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>

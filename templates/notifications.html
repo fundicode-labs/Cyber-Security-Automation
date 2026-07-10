@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2>Notifications</h2>
+        <p class="text-muted mb-0">Unread: {{ unread_count }}</p>
+    </div>
+    <form method="post" action="/notifications/read-all">
+        <button class="btn btn-outline-primary" type="submit">Mark all as read</button>
+    </form>
+</div>
+
+<div class="list-group shadow-sm">
+    {% for item in notifications %}
+    <div class="list-group-item d-flex justify-content-between align-items-start {% if not item.is_read %}list-group-item-warning{% endif %}">
+        <div class="me-3">
+            <div class="fw-semibold">{{ item.title }}</div>
+            <div class="text-muted">{{ item.message }}</div>
+            <small>{{ item.created_at }}</small>
+        </div>
+        {% if not item.is_read %}
+        <form method="post" action="/notifications/{{ item.id }}/read">
+            <button class="btn btn-sm btn-success" type="submit">Mark read</button>
+        </form>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="list-group-item text-muted">No notifications found.</div>
+    {% endfor %}
+</div>
+{% endblock %}

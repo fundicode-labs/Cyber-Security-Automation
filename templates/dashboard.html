@@ -3,44 +3,112 @@
 {% block title %}{{ _('Dashboard') }} - {{ _('Cyber Security Automation') }}{% endblock %}
 
 {% block content %}
+<style>
+    :root {
+        --dash-bg-1: #f5f8ff;
+        --dash-bg-2: #edf8f3;
+        --dash-accent: #154c79;
+        --dash-ink: #0f1f2e;
+    }
+
+    .dashboard-hero {
+        background: linear-gradient(135deg, var(--dash-bg-1), var(--dash-bg-2));
+        border: 1px solid #dbe6f3;
+        border-radius: 1rem;
+        padding: 1.2rem 1.4rem;
+    }
+
+    .metric-card {
+        border: 0;
+        border-radius: 0.9rem;
+        box-shadow: 0 10px 22px rgba(14, 36, 56, 0.08);
+    }
+
+    .metric-label {
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        font-size: 0.76rem;
+        color: #5d6b78;
+        margin-bottom: 0.25rem;
+    }
+
+    .metric-value {
+        color: var(--dash-ink);
+        font-weight: 700;
+        margin-bottom: 0;
+    }
+
+    .analytics-card {
+        border: 0;
+        border-radius: 1rem;
+        box-shadow: 0 14px 28px rgba(15, 35, 52, 0.08);
+    }
+
+    .modules-grid .btn {
+        font-weight: 600;
+        border-radius: 0.7rem;
+    }
+
+    .activity-table thead th {
+        font-size: 0.85rem;
+        letter-spacing: 0.01em;
+    }
+
+    .analytics-subtitle {
+        color: #607080;
+        font-size: 0.88rem;
+        margin-top: -0.2rem;
+        margin-bottom: 0.9rem;
+    }
+
+    .chart-empty {
+        border: 1px dashed #c8d6e2;
+        border-radius: 0.8rem;
+        color: #647788;
+        background: #f8fbfe;
+        text-align: center;
+        padding: 1.4rem 1rem;
+    }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
+    <div class="dashboard-hero w-100">
         <h2>{{ _('Security Dashboard') }}</h2>
-        <p class="text-muted">{{ _('Overview of scan activity and quick access to tools.') }}</p>
+        <p class="text-muted mb-0">{{ _('Overview of scan activity and quick access to tools.') }}</p>
     </div>
 </div>
 
 <div class="row g-3 mb-4">
     <div class="col-md-3">
-        <div class="card border-primary shadow-sm">
+        <div class="card metric-card border-start border-4 border-primary">
             <div class="card-body">
-                <h3 class="card-title">{{ total_scans }}</h3>
-                <p class="card-text mb-0">{{ _('Total scans recorded') }}</p>
+                <p class="metric-label">{{ _('Total scans recorded') }}</p>
+                <h3 class="metric-value">{{ total_scans }}</h3>
             </div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="card border-success shadow-sm">
+        <div class="card metric-card border-start border-4 border-success">
             <div class="card-body">
-                <h3 class="card-title">{{ stats|length }}</h3>
-                <p class="card-text mb-0">{{ _('Scan types tracked') }}</p>
+                <p class="metric-label">{{ _('Scan types tracked') }}</p>
+                <h3 class="metric-value">{{ stats|length }}</h3>
             </div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="card border-secondary shadow-sm">
+        <div class="card metric-card border-start border-4 border-secondary">
             <div class="card-body">
-                <h3 class="card-title">{{ recent_scans|length }}</h3>
-                <p class="card-text mb-0">{{ _('Recent scan entries') }}</p>
+                <p class="metric-label">{{ _('Recent scan entries') }}</p>
+                <h3 class="metric-value">{{ recent_scans|length }}</h3>
             </div>
         </div>
     </div>
-    {% if current_user.role == 'admin' %}
+    {% if is_management_role(current_user.role) %}
     <div class="col-md-3">
-        <div class="card border-warning shadow-sm">
+        <div class="card metric-card border-start border-4 border-warning">
             <div class="card-body">
-                <h3 class="card-title">{{ total_users }}</h3>
-                <p class="card-text mb-0">{{ _('Total users') }}</p>
+                <p class="metric-label">{{ _('Total users') }}</p>
+                <h3 class="metric-value">{{ total_users }}</h3>
                 <small class="text-muted">{{ new_users_last_30 }} {{ _('new in 30d') }}</small>
             </div>
         </div>
@@ -48,8 +116,43 @@
     {% endif %}
 </div>
 
-<h4 class="mb-3">{{ _('Modules') }}</h4>
 <div class="row g-3 mb-4">
+    <div class="col-sm-6 col-xl-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <p class="metric-label">Scans Today</p>
+                <h4 class="metric-value">{{ scans_today }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <p class="metric-label">Scans Last 7 Days</p>
+                <h4 class="metric-value">{{ scans_last_7_days }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <p class="metric-label">Scan Success Rate</p>
+                <h4 class="metric-value">{{ success_rate }}%</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card metric-card">
+            <div class="card-body">
+                <p class="metric-label">Top Target</p>
+                <h4 class="metric-value text-truncate" title="{{ top_target }}">{{ top_target }}</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h4 class="mb-3">{{ _('Modules') }}</h4>
+<div class="row g-3 mb-4 modules-grid">
     <div class="col-sm-6 col-md-3">
         <a href="/port" class="btn btn-primary w-100">{{ _('Port Scanner') }}</a>
     </div>
@@ -65,9 +168,20 @@
     <div class="col-sm-6 col-md-3">
         <a href="/integrity" class="btn btn-danger w-100">{{ _('Integrity Monitor') }}</a>
     </div>
-    {% if current_user.role == "admin" %}
+    {% if is_management_role(current_user.role) %}
     <div class="col-sm-6 col-md-3">
         <a href="/users" class="btn btn-dark w-100">{{ _('User Management') }}</a>
+    </div>
+    {% endif %}
+    <div class="col-sm-6 col-md-3">
+        <a href="/notifications" class="btn btn-outline-primary w-100">Notifications</a>
+    </div>
+    {% if is_management_role(current_user.role) %}
+    <div class="col-sm-6 col-md-3">
+        <a href="/audit" class="btn btn-outline-dark w-100">Audit Logs</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/settings" class="btn btn-outline-secondary w-100">Settings</a>
     </div>
     {% endif %}
     <div class="col-sm-6 col-md-3">
@@ -79,24 +193,68 @@
     <div class="col-sm-6 col-md-3">
         <a href="/change_password" class="btn btn-outline-warning w-100">{{ _('Change Password') }}</a>
     </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/backup" class="btn btn-outline-success w-100">Backup & Restore</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/api" class="btn btn-outline-info w-100">REST API</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/email-alerts" class="btn btn-outline-danger w-100">Email Alerts</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/nmap" class="btn btn-outline-dark w-100">Nmap Integration</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/vulnerabilities" class="btn btn-outline-primary w-100">Vulnerability Scanner</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/malware" class="btn btn-outline-secondary w-100">Malware Scanner</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/threat-intel" class="btn btn-outline-success w-100">Threat Intelligence</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/assistant" class="btn btn-outline-warning w-100">AI Security Assistant</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/payments" class="btn btn-outline-primary w-100">Payments</a>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <a href="/deployment" class="btn btn-outline-dark w-100">Docker & PostgreSQL</a>
+    </div>
 </div>
 
 <div class="row mb-4">
-    <div class="col-12">
-        <div class="card shadow-sm">
+    <div class="col-lg-8">
+        <div class="card analytics-card h-100">
             <div class="card-body">
                 <h5 class="card-title">{{ _('Scan Statistics') }}</h5>
-                <canvas id="scanChart" height="120"></canvas>
+                <p class="analytics-subtitle mb-3">Distribution by scan type with share of total activity.</p>
+                {% if stats|length %}
+                <canvas id="scanChart" height="130"></canvas>
+                {% else %}
+                <div class="chart-empty">No scan statistics yet. Run a few scans to populate this chart.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card analytics-card h-100">
+            <div class="card-body">
+                <h5 class="card-title">7-Day Trend</h5>
+                <p class="analytics-subtitle">Daily scan volume trend over the last week.</p>
+                <canvas id="trendChart" height="130"></canvas>
             </div>
         </div>
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card analytics-card">
     <div class="card-body">
         <h5 class="card-title mb-3">{{ _('Recent Activity') }}</h5>
         <div class="table-responsive">
-            <table class="table table-bordered table-striped mb-0">
+            <table class="table table-bordered table-striped mb-0 activity-table">
                 <thead class="table-light">
                     <tr>
                         <th>{{ _('Type') }}</th>
@@ -111,6 +269,10 @@
                         <td>{{ row[1] }}</td>
                         <td>{{ row[2] }}</td>
                     </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="3" class="text-center text-muted">No recent scan activity yet.</td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -119,25 +281,149 @@
 </div>
 
 <script>
-const labels = {{ stats|map(attribute=0)|list|tojson }};
-const values = {{ stats|map(attribute=1)|list|tojson }};
-const ctx = document.getElementById("scanChart");
-new Chart(ctx, {
-    type: "bar",
+const rawLabels = {{ stats|map(attribute=0)|list|tojson }};
+const rawValues = {{ stats|map(attribute=1)|list|tojson }};
+
+if (rawLabels.length > 0) {
+    const ranked = rawLabels.map((label, index) => ({
+        label,
+        value: rawValues[index]
+    })).sort((a, b) => b.value - a.value);
+
+    const labels = ranked.map(item => item.label);
+    const values = ranked.map(item => item.value);
+    const total = values.reduce((sum, value) => sum + value, 0);
+
+    const palette = [
+        "rgba(17, 94, 163, 0.88)",
+        "rgba(21, 128, 61, 0.85)",
+        "rgba(194, 120, 3, 0.85)",
+        "rgba(185, 28, 28, 0.82)",
+        "rgba(14, 116, 144, 0.82)",
+        "rgba(71, 85, 105, 0.80)",
+        "rgba(4, 120, 87, 0.80)"
+    ];
+
+    const ctx = document.getElementById("scanChart");
+    new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "{{ _('Number of Scans') }}",
+                data: values,
+                backgroundColor: labels.map((_, index) => palette[index % palette.length]),
+                borderRadius: 8,
+                borderSkipped: false,
+                barThickness: 18
+            }]
+        },
+        options: {
+            indexAxis: "y",
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: {
+                        color: "rgba(148, 163, 184, 0.18)"
+                    },
+                    ticks: {
+                        precision: 0,
+                        color: "#4b5f6f"
+                    }
+                },
+                y: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        color: "#1f3445"
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label(context) {
+                            const value = context.raw;
+                            const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+                            return `${value} scans (${pct}%)`;
+                        }
+                    }
+                }
+            },
+            animation: {
+                duration: 900,
+                easing: "easeOutQuart"
+            }
+        }
+    });
+}
+
+const trendCtx = document.getElementById("trendChart");
+const trendGradient = trendCtx.getContext("2d").createLinearGradient(0, 0, 0, 240);
+trendGradient.addColorStop(0, "rgba(17, 94, 163, 0.30)");
+trendGradient.addColorStop(1, "rgba(17, 94, 163, 0.02)");
+
+new Chart(trendCtx, {
+    type: "line",
     data: {
-        labels: labels,
+        labels: {{ trend_labels|tojson }},
         datasets: [{
-            label: "{{ _('Number of Scans') }}",
-            data: values,
-            backgroundColor: "rgba(54, 162, 235, 0.6)",
-            borderColor: "rgba(54, 162, 235, 1)",
-            borderWidth: 1
+            label: "Scans",
+            data: {{ trend_values|tojson }},
+            borderColor: "rgba(17, 94, 163, 1)",
+            backgroundColor: trendGradient,
+            pointBackgroundColor: "rgba(17, 94, 163, 1)",
+            pointHoverRadius: 5,
+            pointRadius: 3,
+            fill: true,
+            tension: 0.38,
+            borderWidth: 2.3
         }]
     },
     options: {
         responsive: true,
+        maintainAspectRatio: false,
         scales: {
-            y: { beginAtZero: true }
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    precision: 0,
+                    color: "#4b5f6f"
+                },
+                grid: {
+                    color: "rgba(148, 163, 184, 0.18)"
+                }
+            },
+            x: {
+                ticks: {
+                    color: "#4b5f6f"
+                },
+                grid: {
+                    display: false
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            },
+            tooltip: {
+                callbacks: {
+                    label(context) {
+                        return `${context.raw} scans`;
+                    }
+                }
+            }
+        },
+        animation: {
+            duration: 850,
+            easing: "easeOutQuart"
         }
     }
 });

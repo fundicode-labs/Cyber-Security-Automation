@@ -4,6 +4,7 @@ from flask import (
     request,
     redirect,
     send_file,
+    jsonify,
     flash,
     make_response
 )
@@ -18,6 +19,7 @@ from flask_login import (
 )
 
 from functools import wraps
+from flask import abort
 from io import BytesIO
 
 from werkzeug.security import (
@@ -36,6 +38,7 @@ from reportlab.platypus import (
 
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
 
 from scanners.port_scanner import scan
 from scanners.network_scanner import scan_network
@@ -43,20 +46,62 @@ from scanners.network_scanner import scan_network
 from security.password_checker import check
 from security.log_analyzer import analyze_log
 from security.integrity_monitor import calculate_hash
+from scanners.nmap_scanner import run_nmap_scan
+from security.vulnerability_scanner import scan_vulnerabilities
+from security.malware_scanner import scan_path as scan_malware_path
+from security.threat_intel import lookup_indicator
+from security.ai_assistant import summarize_security_state
+from security.email_alerts import send_email_alert
+from backup_manager import create_backup, list_backups, restore_backup, BACKUP_DIR
+
+# RBAC and Production Features
+from rbac import (
+    require_permission, require_any_permission, 
+    require_all_permissions, require_role,
+    user_can, user_has_role, get_user_permissions, get_user_role_info, log_action
+)
+from roles import ROLES, has_permission, get_role_permissions
+from settings import SystemSettings, get_setting, set_setting
+from notifications import NotificationManager, create_notification
+from database import connect, is_postgres_enabled
 
 import re
+import json
 import secrets
 import sqlite3
 import os
 import socket
 import ipaddress
+import hashlib
+import hmac
+from urllib import request as urllib_request
+from urllib import error as urllib_error
 from datetime import datetime, timedelta
+from typing import Any
 
 
 DB_PATH = os.path.join(
     os.path.dirname(__file__),
     "database.db"
 )
+
+PAYMENT_LIVE_KEYS = {
+    "mixbyyas_endpoint",
+    "mixbyyas_api_key",
+    "mixbyyas_webhook_secret",
+    "mixbyyas_allowed_ips",
+    "halopesa_endpoint",
+    "halopesa_api_key",
+    "halopesa_webhook_secret",
+    "halopesa_allowed_ips",
+    "payment_webhook_tolerance_seconds"
+}
+
+PRIVILEGED_ROLES = {"admin", "super_admin", "security_admin"}
+
+
+def is_management_role(role_name):
+    return role_name in PRIVILEGED_ROLES
 
 LANGUAGES = {
     "en": "English",
@@ -197,9 +242,9 @@ TRANSLATIONS = {
         "Sign in here": "Ingia hapa",
         "Security Dashboard": "Kioshi la Usalama",
         "Overview of scan activity and quick access to tools.": "Muhtasari wa shughuli za skanu na ufikiaji wa zana kwa haraka.",
-        "Total scans recorded": "Skanu zote zilizorekodiwa",
-        "Scan types tracked": "Aina za skanu zinazoangaliwa",
-        "Recent scan entries": "Kuingia za skanu za hivi karibuni",
+        "Total scans recorded": "Skani zote zilizorekodiwa",
+        "Scan types tracked": "Aina za skani zinazoangaliwa",
+        "Recent scan entries": "Kuingia za skani za hivi karibuni",
         "Total users": "Watumiaji wote",
         "new in 30d": "mpya ndani ya siku 30",
         "Modules": "Moduli",
@@ -209,20 +254,20 @@ TRANSLATIONS = {
         "Log Analyzer": "Mchambuzi wa Logi",
         "Integrity Monitor": "Kikagua Uadilifu",
         "User Management": "Usimamizi wa Watumiaji",
-        "Scan History": "Historia ya Skanu",
+        "Scan History": "Historia ya Skani",
         "Change Password": "Badilisha Nenosiri",
         "Current Password": "Nenosiri la sasa",
         "New Password": "Nenosiri jipya",
         "Confirm New Password": "Thibitisha nenosiri jipya",
-        "Search and review recorded scan activity.": "Tafuta na uangalie shughuli za skanu zilizorekodiwa.",
-        "Search by scan type or target...": "Tafuta kwa aina ya skanu au lengo...",
+        "Search and review recorded scan activity.": "Tafuta na uangalie shughuli za skani zilizorekodiwa.",
+        "Search by scan type or target...": "Tafuta kwa aina ya skani au lengo...",
         "Search": "Tafuta",
-        "No scan history found.": "Hakuna historia ya skanu iliyopatikana.",
+        "No scan history found.": "Hakuna historia ya skani iliyopatikana.",
         "Type": "Aina",
         "Target": "Lengo",
         "Date": "Tarehe",
         "Result": "Matokeo",
-        "Scan Results": "Matokeo ya Skanu",
+        "Scan Results": "Matokeo ya Skani",
         "Discovered Devices": "Vifaa vilivyogunduliwa",
         "IP Address": "Anuani ya IP",
         "MAC Address": "Anuani ya MAC",
@@ -235,12 +280,12 @@ TRANSLATIONS = {
         "Enter username": "Ingiza jina la mtumiaji",
         "Enter password": "Ingiza nenosiri",
         "Repeat password": "Rudia nenosiri",
-        "Scan": "Fanya skanu",
+        "Scan": "Fanya skani",
         "Check": "Kagua",
         "Analyze": "Chambua",
-        "Scan Network": "Fanya skanu ya mtandao",
-        "Number of Scans": "Idadi ya skanu",
-        "Scan Statistics": "Takwimu za skanu",
+        "Scan Network": "Fanya skani ya mtandao",
+        "Number of Scans": "Idadi ya skani",
+        "Scan Statistics": "Takwimu za skani",
         "Recent Activity": "Shughuli za hivi karibuni",
         "Port": "Bandari",
         "Status": "Hali",
@@ -302,7 +347,9 @@ def translate(text):
 
 app = Flask(__name__)
 
-app.secret_key = secrets.token_hex(32)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+
+database_initialized = False
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -311,10 +358,20 @@ setattr(login_manager, "login_view", "login")
 
 @app.context_processor
 def inject_translations():
+    notification_count = 0
+    if current_user.is_authenticated:
+        notification_count = NotificationManager.get_unread_count(current_user.id)
+
     return {
         "_": translate,
         "current_language": get_locale(),
-        "available_languages": LANGUAGES
+        "available_languages": LANGUAGES,
+        "notification_count": notification_count,
+        "user_can": user_can,
+        "user_has_role": user_has_role,
+        "get_user_permissions": get_user_permissions,
+        "get_user_role_info": get_user_role_info,
+        "is_management_role": is_management_role
     }
 
 
@@ -328,32 +385,205 @@ def set_language(lang):
 
 
 def init_database():
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect() as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Create users table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE,
-                password TEXT,
-                role TEXT DEFAULT 'user',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                email TEXT DEFAULT ''
-            )
-        """)
+        if is_postgres_enabled():
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users(
+                    id SERIAL PRIMARY KEY,
+                    username TEXT UNIQUE,
+                    password TEXT,
+                    role TEXT DEFAULT 'user',
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    email TEXT DEFAULT ''
+                )
+            """)
 
-        # Create scan history table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS scan_history(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scan_type TEXT,
-                target TEXT,
-                result TEXT,
-                scan_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs(
+                    id SERIAL PRIMARY KEY,
+                    username TEXT,
+                    action TEXT,
+                    details TEXT,
+                    log_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scan_history(
+                    id SERIAL PRIMARY KEY,
+                    scan_type TEXT,
+                    target TEXT,
+                    result TEXT,
+                    scan_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS backup_logs(
+                    id SERIAL PRIMARY KEY,
+                    backup_type TEXT,
+                    file_path TEXT,
+                    size_bytes INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    created_by TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    restored_at TIMESTAMPTZ
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS payments(
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    plan_name TEXT DEFAULT 'Monthly Subscription',
+                    amount NUMERIC(12, 2) NOT NULL,
+                    currency TEXT DEFAULT 'TZS',
+                    payment_method TEXT,
+                    reference TEXT UNIQUE,
+                    status TEXT DEFAULT 'pending',
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMPTZ
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notifications(
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    title TEXT,
+                    message TEXT,
+                    notification_type TEXT DEFAULT 'info',
+                    is_read INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_settings(
+                    id SERIAL PRIMARY KEY,
+                    key TEXT UNIQUE,
+                    value TEXT,
+                    setting_type TEXT DEFAULT 'string',
+                    description TEXT,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE,
+                    password TEXT,
+                    role TEXT DEFAULT 'user',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    email TEXT DEFAULT ''
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT,
+                    action TEXT,
+                    details TEXT,
+                    log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scan_history(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_type TEXT,
+                    target TEXT,
+                    result TEXT,
+                    scan_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS backup_logs(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    backup_type TEXT,
+                    file_path TEXT,
+                    size_bytes INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    created_by TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    restored_at TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS payments(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    plan_name TEXT DEFAULT 'Monthly Subscription',
+                    amount REAL NOT NULL,
+                    currency TEXT DEFAULT 'TZS',
+                    payment_method TEXT,
+                    reference TEXT UNIQUE,
+                    status TEXT DEFAULT 'pending',
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS notifications(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    title TEXT,
+                    message TEXT,
+                    notification_type TEXT DEFAULT 'info',
+                    is_read INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_settings(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT UNIQUE,
+                    value TEXT,
+                    setting_type TEXT DEFAULT 'string',
+                    description TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+        default_settings = [
+            ("company_name", "Cyber Security Automation", "string", "Organization name"),
+            ("default_network", "192.168.1.0/24", "string", "Default network range"),
+            ("scan_timeout", "300", "string", "Scan timeout in seconds"),
+            ("password_min_length", "8", "string", "Minimum password length"),
+            ("max_login_attempts", "5", "string", "Failed login limit before lockout"),
+            ("lockout_duration", "900", "string", "Lockout duration in seconds"),
+            ("enable_email_alerts", "1", "string", "Enable email notifications"),
+            ("mixbyyas_endpoint", "", "string", "Mix by YAS payment API endpoint"),
+            ("mixbyyas_api_key", "", "string", "Mix by YAS API key"),
+            ("mixbyyas_webhook_secret", "", "string", "Mix by YAS webhook signing secret"),
+            ("mixbyyas_allowed_ips", "", "string", "Comma separated Mix by YAS callback IPs"),
+            ("halopesa_endpoint", "", "string", "HaloPesa payment API endpoint"),
+            ("halopesa_api_key", "", "string", "HaloPesa API key"),
+            ("halopesa_webhook_secret", "", "string", "HaloPesa webhook signing secret"),
+            ("halopesa_allowed_ips", "", "string", "Comma separated HaloPesa callback IPs"),
+            ("payment_webhook_tolerance_seconds", "300", "string", "Allowed callback timestamp drift in seconds")
+        ]
+
+        for key, value, setting_type, description in default_settings:
+            cursor.execute("SELECT id FROM system_settings WHERE key = ?", (key,))
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "INSERT INTO system_settings (key, value, setting_type, description) VALUES (?, ?, ?, ?)",
+                    (key, value, setting_type, description)
+                )
 
         cursor.execute("""
             SELECT id
@@ -364,31 +594,91 @@ def init_database():
         admin = cursor.fetchone()
 
         if admin is None:
-            cursor.execute("""
-                INSERT OR IGNORE INTO users(
-                    username,
-                    password,
-                    role
-                )
-                VALUES(?,?,?)
-            """, (
-                "admin",
-                generate_password_hash("admin123"),
-                "admin"
-            ))
+            if is_postgres_enabled():
+                cursor.execute("""
+                    INSERT INTO users(
+                        username,
+                        password,
+                        role
+                    )
+                    VALUES(%s,%s,%s)
+                    ON CONFLICT (username) DO NOTHING
+                """, (
+                    "admin",
+                    generate_password_hash("admin123"),
+                    "super_admin"
+                ))
+            else:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO users(
+                        username,
+                        password,
+                        role
+                    )
+                    VALUES(?,?,?)
+                """, (
+                    "admin",
+                    generate_password_hash("admin123"),
+                    "super_admin"
+                ))
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS login_attempts(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ip TEXT UNIQUE,
-                attempts INTEGER DEFAULT 0,
-                last_attempt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        if is_postgres_enabled():
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS login_attempts(
+                    id SERIAL PRIMARY KEY,
+                    ip TEXT UNIQUE,
+                    attempts INTEGER DEFAULT 0,
+                    last_attempt TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS payment_webhook_events(
+                    id SERIAL PRIMARY KEY,
+                    provider TEXT,
+                    event_id TEXT UNIQUE,
+                    reference TEXT,
+                    status TEXT,
+                    source_ip TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS login_attempts(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip TEXT UNIQUE,
+                    attempts INTEGER DEFAULT 0,
+                    last_attempt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS payment_webhook_events(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT,
+                    event_id TEXT UNIQUE,
+                    reference TEXT,
+                    status TEXT,
+                    source_ip TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+
+def ensure_database_initialized():
+    global database_initialized
+    if database_initialized:
+        return
+    init_database()
+    database_initialized = True
+
+
+@app.before_request
+def bootstrap_database():
+    ensure_database_initialized()
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -489,7 +779,7 @@ def is_login_blocked(ip):
 def admin_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
-        if current_user.role != "admin":
+        if not is_management_role(getattr(current_user, "role", "")):
             flash("Admin access required.", "danger")
             return redirect("/")
         return view_func(*args, **kwargs)
@@ -506,16 +796,22 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id,
-                   username,
-                   role
-            FROM users
-            WHERE id = ?
-        """, (user_id,))
-        user = cursor.fetchone()
+
+    conn = connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id,
+               username,
+               role
+        FROM users
+        WHERE id=?
+    """, (user_id,))
+
+    user = cursor.fetchone()
+
+    conn.close()
 
     if user:
         return User(
@@ -523,6 +819,7 @@ def load_user(user_id):
             user["username"],
             user["role"]
         )
+
     return None
 
 
@@ -624,13 +921,12 @@ def login():
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT
-                    id,
+            SELECT id,
                     username,
                     password,
                     role
-                FROM users
-                WHERE username = ?
+            FROM users
+            WHERE username=?
             """, (username,))
             user = cursor.fetchone()
 
@@ -647,6 +943,11 @@ def login():
         if check_password_hash(user["password"], password):
             clear_login_attempts(client_ip)
             login_user(User(user["id"], user["username"], user["role"]))
+            save_audit(
+                user["username"],
+                "LOGIN",
+                "User logged into the system."
+            )
             flash(
                 "Login successful.",
                 "success"
@@ -732,6 +1033,16 @@ def dashboard():
         """)
         stats = cursor.fetchall()
 
+        cursor.execute("""
+            SELECT scan_date,
+                   result,
+                   target
+            FROM scan_history
+            ORDER BY scan_date DESC
+            LIMIT 500
+        """) 
+        scan_rows = cursor.fetchall()
+
         # Recent Scans
         cursor.execute("""
             SELECT scan_type,
@@ -745,7 +1056,7 @@ def dashboard():
 
         total_users = 0
         new_users_last_30 = 0
-        if current_user.is_authenticated and current_user.role == "admin":
+        if current_user.is_authenticated and is_management_role(current_user.role):
             cursor.execute("SELECT COUNT(*) FROM users")
             total_users = cursor.fetchone()[0]
             cursor.execute(
@@ -753,13 +1064,75 @@ def dashboard():
             )
             new_users_last_30 = cursor.fetchone()[0]
 
+    now_utc = datetime.utcnow()
+    scans_today = 0
+    scans_last_7_days = 0
+    success_count = 0
+    parsed_scan_dates = []
+    targets_counter = {}
+
+    for row in scan_rows:
+        raw_date = row[0]
+        result_text = str(row[1] or "")
+        target_text = str(row[2] or "unknown")
+
+        scan_dt = None
+        if isinstance(raw_date, datetime):
+            scan_dt = raw_date
+        elif isinstance(raw_date, str):
+            date_text = raw_date.replace("Z", "").replace("T", " ")
+            try:
+                scan_dt = datetime.fromisoformat(date_text)
+            except ValueError:
+                try:
+                    scan_dt = datetime.strptime(date_text, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    scan_dt = None
+
+        if scan_dt:
+            parsed_scan_dates.append(scan_dt)
+            if scan_dt.date() == now_utc.date():
+                scans_today += 1
+            if now_utc - scan_dt <= timedelta(days=7):
+                scans_last_7_days += 1
+
+        targets_counter[target_text] = targets_counter.get(target_text, 0) + 1
+
+        lowered_result = result_text.lower()
+        if not any(token in lowered_result for token in ["error", "failed", "not installed", "invalid"]):
+            success_count += 1
+
+    success_rate = round((success_count / total_scans) * 100, 1) if total_scans else 0.0
+    top_target = "-"
+    if targets_counter:
+        top_target = max(targets_counter, key=targets_counter.get)
+
+    trend_counts = {}
+    for day_offset in range(6, -1, -1):
+        day = (now_utc - timedelta(days=day_offset)).date()
+        trend_counts[day.isoformat()] = 0
+
+    for scan_dt in parsed_scan_dates:
+        key = scan_dt.date().isoformat()
+        if key in trend_counts:
+            trend_counts[key] += 1
+
+    trend_labels = list(trend_counts.keys())
+    trend_values = list(trend_counts.values())
+
     return render_template(
         "dashboard.html",
         total_scans=total_scans,
         recent_scans=recent_scans,
         stats=stats,
         total_users=total_users,
-        new_users_last_30=new_users_last_30
+        new_users_last_30=new_users_last_30,
+        scans_today=scans_today,
+        scans_last_7_days=scans_last_7_days,
+        success_rate=success_rate,
+        top_target=top_target,
+        trend_labels=trend_labels,
+        trend_values=trend_values
     )
 
 
@@ -869,6 +1242,11 @@ def port():
                     host,
                     results
                 )
+                save_audit(
+                current_user.username,
+                    "PORT SCAN",
+                     f"Scanned host {host}"
+)
             except Exception as e:
                 error = str(e)
 
@@ -898,6 +1276,11 @@ def network():
                 devices
             )
 
+            save_audit(
+                current_user.username,
+               "NETWORK SCAN",
+               f"Scanned network {network_range}"
+)
     return render_template(
         "network_scanner.html",
         devices=devices
@@ -914,6 +1297,12 @@ def password():
         password_value = request.form["password"]
 
         score = check(password_value)
+
+        save_audit(
+           current_user.username,
+           "PASSWORD CHECK",
+           "Password strength analyzed."
+)
 
     return render_template(
         "password_checker.html",
@@ -940,6 +1329,12 @@ def logs():
                 results
             )
 
+            save_audit(
+                current_user.username,
+                "LOG ANALYSIS",
+                f"Analyzed {logfile}"
+)
+
     return render_template(
         "log_analyzer.html",
         results=results
@@ -965,6 +1360,12 @@ def integrity():
                 file_hash
             )
 
+            save_audit(
+               current_user.username,
+               "FILE INTEGRITY",
+                filename
+)
+
     return render_template(
         "integrity_monitor.html",
         file_hash=file_hash
@@ -982,6 +1383,1019 @@ def save_scan(scan_type, target, result):
             VALUES (?, ?, ?)
         """, (scan_type, target, str(result)))
         conn.commit()
+
+
+def save_backup_log(backup_type, file_path, size_bytes, status, created_by, restored_at=None):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO backup_logs (
+                backup_type,
+                file_path,
+                size_bytes,
+                status,
+                created_by,
+                restored_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (backup_type, file_path, size_bytes, status, created_by, restored_at)
+        )
+        conn.commit()
+
+
+def get_backup_log_entries():
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM backup_logs ORDER BY created_at DESC LIMIT 50")
+        return cursor.fetchall()
+
+def save_audit(username, action, details):
+    with connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO audit_logs(
+                username,
+                action,
+                details
+            )
+            VALUES (?, ?, ?)
+        """, (
+            username,
+            action,
+            details
+        ))
+        conn.commit()
+
+
+def fetch_payment_stats(records):
+    total_count = len(records)
+    pending_count = 0
+    paid_count = 0
+    paid_total = 0.0
+    paid_usd = 0.0
+    paid_eur = 0.0
+
+    for row in records:
+        status = str(row["status"] or "").lower()
+        amount = float(row["amount"] or 0)
+        currency = str(row["currency"] or "").upper()
+        if status == "pending":
+            pending_count += 1
+        if status == "paid":
+            paid_count += 1
+            paid_total += amount
+            if currency == "USD":
+                paid_usd += amount
+            if currency == "EUR":
+                paid_eur += amount
+
+    return {
+        "total_count": total_count,
+        "pending_count": pending_count,
+        "paid_count": paid_count,
+        "paid_total": round(paid_total, 2),
+        "paid_usd": round(paid_usd, 2),
+        "paid_eur": round(paid_eur, 2)
+    }
+
+
+def get_live_payment_setting(key: str, default: str = "") -> str:
+    if key in PAYMENT_LIVE_KEYS:
+        env_key = f"CSA_{key.upper()}"
+        env_value = os.environ.get(env_key)
+        if env_value is not None and str(env_value).strip() != "":
+            return str(env_value).strip()
+    return str(get_setting(key, default) or default).strip()
+
+
+def is_live_payment_setting_from_env(key: str) -> bool:
+    if key not in PAYMENT_LIVE_KEYS:
+        return False
+    env_key = f"CSA_{key.upper()}"
+    env_value = os.environ.get(env_key)
+    return env_value is not None and str(env_value).strip() != ""
+
+
+def extract_first_value(payload: dict[str, Any], keys: list[str]) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return str(value)
+
+    nested = payload.get("data")
+    if isinstance(nested, dict):
+        for key in keys:
+            value = nested.get(key)
+            if value not in (None, ""):
+                return str(value)
+
+    return ""
+
+
+def map_gateway_status(raw_status: object) -> str:
+    status_value = str(raw_status or "pending").strip().lower()
+    if status_value in {"success", "successful", "complete", "completed", "paid"}:
+        return "paid"
+    if status_value in {"failed", "failure", "declined", "rejected", "error"}:
+        return "failed"
+    if status_value in {"cancelled", "canceled", "void"}:
+        return "cancelled"
+    return "pending"
+
+
+def verify_callback_signature(provider: str, raw_body: bytes) -> bool:
+    if provider not in {"mixbyyas", "halopesa"}:
+        return True
+
+    secret = get_live_payment_setting(f"{provider}_webhook_secret", "")
+    if not secret:
+        return True
+
+    incoming_signature = (
+        str(request.headers.get("X-Signature", "") or "").strip()
+        or str(request.headers.get("X-Callback-Signature", "") or "").strip()
+    )
+    if not incoming_signature:
+        return False
+
+    expected_signature = hmac.new(
+        secret.encode("utf-8"),
+        raw_body,
+        hashlib.sha256
+    ).hexdigest()
+
+    ts_header = str(request.headers.get("X-Signature-Timestamp", "") or "").strip()
+    signed_with_ts = ""
+    if ts_header:
+        signed_with_ts = hmac.new(
+            secret.encode("utf-8"),
+            f"{ts_header}.{raw_body.decode('utf-8', errors='ignore')}".encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+    if ts_header:
+        try:
+            tolerance_seconds = int(get_live_payment_setting("payment_webhook_tolerance_seconds", "300"))
+            ts_value = int(ts_header)
+            if abs(int(datetime.utcnow().timestamp()) - ts_value) > tolerance_seconds:
+                return False
+        except ValueError:
+            return False
+
+    ts_match = False
+    if signed_with_ts:
+        ts_match = hmac.compare_digest(incoming_signature, signed_with_ts)
+
+    return hmac.compare_digest(incoming_signature, expected_signature) or ts_match
+
+
+def is_allowed_callback_ip(provider: str) -> bool:
+    source_ip = get_client_ip()
+    allowlist = get_live_payment_setting(f"{provider}_allowed_ips", "")
+    if not allowlist:
+        return True
+
+    allowed_ips = [item.strip() for item in allowlist.split(",") if item.strip()]
+    return source_ip in allowed_ips
+
+
+def record_webhook_event(provider: str, event_id: str, reference: str, status: str) -> None:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO payment_webhook_events (
+                provider,
+                event_id,
+                reference,
+                status,
+                source_ip
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (provider, event_id, reference, status, get_client_ip())
+        )
+
+
+def is_replayed_webhook_event(event_id: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM payment_webhook_events WHERE event_id = ?",
+            (event_id,)
+        )
+        return cursor.fetchone() is not None
+
+
+def process_mobile_money_payment(provider, amount, currency, reference, phone_number, description):
+    endpoint_key = f"{provider}_endpoint"
+    api_key_name = f"{provider}_api_key"
+    endpoint = get_live_payment_setting(endpoint_key, "")
+    api_key = get_live_payment_setting(api_key_name, "")
+
+    if not endpoint or not api_key:
+        return {
+            "ok": False,
+            "status": "pending",
+            "message": f"{provider} gateway is not configured in system settings.",
+            "provider_reference": ""
+        }
+
+    payload = {
+        "reference": reference,
+        "amount": round(float(amount), 2),
+        "currency": currency,
+        "phone": phone_number,
+        "description": description,
+        "callback_url": request.host_url.rstrip("/") + "/payments/callback"
+    }
+
+    if provider == "mixbyyas":
+        payload.update({
+            "merchant_reference": reference,
+            "customer_msisdn": phone_number,
+            "provider": "mixbyyas"
+        })
+    elif provider == "halopesa":
+        payload.update({
+            "external_reference": reference,
+            "msisdn": phone_number,
+            "provider": "halopesa"
+        })
+
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib_request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=15) as response:
+            raw = response.read().decode("utf-8") if response else "{}"
+            data = json.loads(raw or "{}")
+
+        normalized_status = map_gateway_status(data.get("status", "pending"))
+        provider_reference = str(extract_first_value(data, [
+            "transaction_id", "transaction_ref", "reference", "external_reference", "merchant_reference"
+        ]))
+        if normalized_status == "paid":
+            return {
+                "ok": True,
+                "status": "paid",
+                "message": data.get("message", "Payment completed successfully."),
+                "provider_reference": provider_reference
+            }
+
+        return {
+            "ok": False,
+            "status": normalized_status,
+            "message": data.get("message", "Payment request submitted and is pending confirmation."),
+            "provider_reference": provider_reference
+        }
+    except (urllib_error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "pending",
+            "message": f"Gateway request failed: {exc}",
+            "provider_reference": ""
+        }
+
+
+@app.route("/payments", methods=["GET", "POST"])
+@login_required
+@require_permission("payments.view")
+def payments_page():
+    allowed_methods = {"mixbyyas", "halopesa", "card", "bank", "cash"}
+    allowed_currencies = {"USD", "EUR"}
+    provider_labels = {
+        "mixbyyas": "Mix by YAS",
+        "halopesa": "HaloPesa",
+        "card": "Card",
+        "bank": "Bank",
+        "cash": "Cash"
+    }
+
+    if request.method == "POST":
+        if not user_can("payments.create"):
+            flash("You do not have permission to create payments.", "danger")
+            return redirect("/payments")
+
+        plan_name = request.form.get("plan_name", "Monthly Subscription").strip() or "Monthly Subscription"
+        amount_text = request.form.get("amount", "").strip()
+        currency = request.form.get("currency", "USD").strip().upper()
+        payment_method = request.form.get("payment_method", "mixbyyas").strip().lower()
+        phone_number = request.form.get("phone_number", "").strip()
+        notes = request.form.get("notes", "").strip()
+
+        try:
+            amount = float(amount_text)
+        except ValueError:
+            flash("Please provide a valid amount.", "danger")
+            return redirect("/payments")
+
+        if amount <= 0:
+            flash("Amount must be greater than zero.", "danger")
+            return redirect("/payments")
+
+        if payment_method not in allowed_methods:
+            flash("Unsupported payment method selected.", "danger")
+            return redirect("/payments")
+
+        if currency not in allowed_currencies:
+            flash("Currency must be USD or EUR.", "danger")
+            return redirect("/payments")
+
+        if payment_method in {"mixbyyas", "halopesa"} and not phone_number:
+            flash("Phone number is required for mobile money payments.", "danger")
+            return redirect("/payments")
+
+        reference = f"PAY-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3).upper()}"
+
+        status = "pending"
+        paid_at = None
+        gateway_message = ""
+
+        if payment_method in {"mixbyyas", "halopesa"}:
+            gateway_result = process_mobile_money_payment(
+                payment_method,
+                amount,
+                currency,
+                reference,
+                phone_number,
+                f"{plan_name} for {current_user.username}"
+            )
+            status = gateway_result["status"]
+            if status == "paid":
+                paid_at = datetime.utcnow().isoformat()
+            provider_ref = gateway_result.get("provider_reference", "")
+            gateway_message = gateway_result.get("message", "")
+            if provider_ref:
+                notes = f"{notes} ProviderRef: {provider_ref}".strip()
+            if gateway_message:
+                notes = f"{notes} Gateway: {gateway_message}".strip()
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO payments (
+                    user_id,
+                    plan_name,
+                    amount,
+                    currency,
+                    payment_method,
+                    reference,
+                    status,
+                    notes,
+                    paid_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (current_user.id, plan_name, amount, currency, payment_method, reference, status, notes, paid_at)
+            )
+
+        save_audit(
+            current_user.username,
+            "PAYMENT_CREATE",
+            f"Created payment {reference} with amount {amount:.2f} {currency} via {provider_labels[payment_method]}"
+        )
+
+        create_notification(
+            current_user.id,
+            "Payment Created",
+            f"Payment request {reference} was created successfully.",
+            "info"
+        )
+
+        if gateway_message:
+            flash(gateway_message, "info")
+        flash("Payment created successfully.", "success")
+        return redirect("/payments")
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if is_management_role(current_user.role):
+            cursor.execute(
+                """
+                SELECT p.id,
+                       p.user_id,
+                       u.username,
+                       p.plan_name,
+                       p.amount,
+                       p.currency,
+                       p.payment_method,
+                       p.reference,
+                       p.status,
+                       p.notes,
+                       p.created_at,
+                       p.paid_at
+                FROM payments p
+                LEFT JOIN users u ON u.id = p.user_id
+                ORDER BY p.created_at DESC
+                LIMIT 200
+                """
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT p.id,
+                       p.user_id,
+                       u.username,
+                       p.plan_name,
+                       p.amount,
+                       p.currency,
+                       p.payment_method,
+                       p.reference,
+                       p.status,
+                       p.notes,
+                       p.created_at,
+                       p.paid_at
+                FROM payments p
+                LEFT JOIN users u ON u.id = p.user_id
+                WHERE p.user_id = ?
+                ORDER BY p.created_at DESC
+                LIMIT 200
+                """,
+                (current_user.id,)
+            )
+        records = cursor.fetchall()
+
+    return render_template(
+        "payments.html",
+        records=records,
+        stats=fetch_payment_stats(records),
+        can_manage=is_management_role(current_user.role)
+    )
+
+
+@app.route("/payments/<int:payment_id>/status", methods=["POST"])
+@login_required
+@require_permission("payments.approve")
+def update_payment_status(payment_id):
+    next_status = request.form.get("status", "").strip().lower()
+    allowed_statuses = {"pending", "paid", "failed", "cancelled"}
+
+    if next_status not in allowed_statuses:
+        flash("Invalid payment status.", "danger")
+        return redirect("/payments")
+
+    paid_at = datetime.utcnow().isoformat() if next_status == "paid" else None
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT reference FROM payments WHERE id = ?", (payment_id,))
+        payment = cursor.fetchone()
+        if payment is None:
+            flash("Payment not found.", "danger")
+            return redirect("/payments")
+
+        cursor.execute(
+            "UPDATE payments SET status = ?, paid_at = ? WHERE id = ?",
+            (next_status, paid_at, payment_id)
+        )
+
+    save_audit(
+        current_user.username,
+        "PAYMENT_STATUS_UPDATE",
+        f"Updated {payment['reference']} to {next_status}"
+    )
+    flash("Payment status updated.", "success")
+    return redirect("/payments")
+
+
+@app.route("/payments/<int:payment_id>/invoice")
+@login_required
+@require_permission("payments.invoice")
+def payment_invoice(payment_id):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if is_management_role(current_user.role):
+            cursor.execute(
+                """
+                SELECT p.*, u.username, u.email
+                FROM payments p
+                LEFT JOIN users u ON u.id = p.user_id
+                WHERE p.id = ?
+                """,
+                (payment_id,)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT p.*, u.username, u.email
+                FROM payments p
+                LEFT JOIN users u ON u.id = p.user_id
+                WHERE p.id = ? AND p.user_id = ?
+                """,
+                (payment_id, current_user.id)
+            )
+        payment = cursor.fetchone()
+
+    if payment is None:
+        flash("Payment not found.", "danger")
+        return redirect("/payments")
+
+    payment_record = dict(payment)
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        title=f"Invoice {payment_record['reference']}",
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch
+    )
+    styles = getSampleStyleSheet()
+
+    elements = [
+        Paragraph("Cyber Security Automation - Payment Invoice", styles["Title"]),
+        Spacer(1, 12),
+        Paragraph(f"Invoice Reference: {payment_record['reference']}", styles["Heading3"]),
+        Paragraph(f"Customer: {payment_record['username'] or 'Unknown'}", styles["Normal"]),
+        Paragraph(f"Email: {payment_record['email'] or '-'}", styles["Normal"]),
+        Paragraph(f"Plan: {payment_record['plan_name']}", styles["Normal"]),
+        Paragraph(f"Payment Method: {str(payment_record['payment_method']).upper()}", styles["Normal"]),
+        Paragraph(f"Status: {str(payment_record['status']).upper()}", styles["Normal"]),
+        Paragraph(f"Amount: {float(payment_record['amount']):.2f} {payment_record['currency']}", styles["Normal"]),
+        Paragraph(f"Created At: {payment_record['created_at']}", styles["Normal"]),
+        Paragraph(f"Paid At: {payment_record['paid_at'] or '-'}", styles["Normal"]),
+        Spacer(1, 12),
+        Paragraph(f"Notes: {payment_record['notes'] or '-'}", styles["Normal"])
+    ]
+
+    doc.build(elements)
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"invoice_{payment_record['reference']}.pdf",
+        mimetype="application/pdf"
+    )
+
+
+@app.route("/payments/callback", methods=["POST"])
+def payments_callback():
+    raw_body = request.get_data(cache=True)
+    payload = request.get_json(silent=True) or {}
+
+    provider_raw = (
+        payload.get("provider")
+        or request.args.get("provider")
+        or request.headers.get("X-Payment-Provider", "")
+    )
+    provider = str(provider_raw or "").strip().lower()
+
+    if provider and not is_allowed_callback_ip(provider):
+        return jsonify({"ok": False, "message": "callback IP is not allowed"}), 403
+
+    if not verify_callback_signature(provider, raw_body):
+        return jsonify({"ok": False, "message": "invalid callback signature"}), 401
+
+    reference = str(extract_first_value(payload, [
+        "reference", "merchant_reference", "external_reference", "order_id", "invoice_id", "transaction_ref"
+    ])).strip()
+    normalized_status = map_gateway_status(extract_first_value(payload, ["status", "transaction_status"]))
+
+    if not reference:
+        return jsonify({"ok": False, "message": "reference is required"}), 400
+
+    event_raw = extract_first_value(payload, ["event_id", "id", "transaction_id", "callback_id"])
+    event_id = str(event_raw or "").strip()
+    if not event_id:
+        digest = hashlib.sha256(raw_body).hexdigest()[:16]
+        event_id = f"{provider or 'gateway'}:{reference}:{digest}"
+
+    if is_replayed_webhook_event(event_id):
+        return jsonify({"ok": True, "reference": reference, "status": "duplicate"})
+
+    paid_at = datetime.utcnow().isoformat() if normalized_status == "paid" else None
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, user_id FROM payments WHERE reference = ?", (reference,))
+        payment = cursor.fetchone()
+        if payment is None:
+            return jsonify({"ok": False, "message": "payment not found"}), 404
+
+        cursor.execute(
+            "UPDATE payments SET status = ?, paid_at = ? WHERE reference = ?",
+            (normalized_status, paid_at, reference)
+        )
+
+    record_webhook_event(provider or "unknown", event_id, reference, normalized_status)
+
+    payment_user_id = dict(payment).get("user_id")
+    if normalized_status == "paid" and payment_user_id is not None:
+        create_notification(
+            payment_user_id,
+            "Payment Confirmed",
+            f"Payment {reference} has been confirmed.",
+            "success"
+        )
+
+    return jsonify({"ok": True, "reference": reference, "status": normalized_status})
+
+
+@app.route("/payments/gateway-health")
+@login_required
+@require_permission("payments.approve")
+def payments_gateway_health():
+    providers = ["mixbyyas", "halopesa"]
+    rows = []
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        for provider in providers:
+            cursor.execute(
+                """
+                SELECT event_id, reference, status, source_ip, created_at
+                FROM payment_webhook_events
+                WHERE provider = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (provider,)
+            )
+            last_event = cursor.fetchone()
+            rows.append({
+                "provider": provider,
+                "endpoint": get_live_payment_setting(f"{provider}_endpoint", ""),
+                "has_api_key": bool(get_live_payment_setting(f"{provider}_api_key", "")),
+                "has_webhook_secret": bool(get_live_payment_setting(f"{provider}_webhook_secret", "")),
+                "allowed_ips": get_live_payment_setting(f"{provider}_allowed_ips", ""),
+                "endpoint_from_env": is_live_payment_setting_from_env(f"{provider}_endpoint"),
+                "api_key_from_env": is_live_payment_setting_from_env(f"{provider}_api_key"),
+                "webhook_secret_from_env": is_live_payment_setting_from_env(f"{provider}_webhook_secret"),
+                "last_event": dict(last_event) if last_event else None
+            })
+
+    return render_template(
+        "payments_health.html",
+        gateways=rows,
+        webhook_tolerance=get_live_payment_setting("payment_webhook_tolerance_seconds", "300")
+    )
+
+
+@app.route("/notifications")
+@login_required
+def notifications():
+    unread_only = request.args.get("unread") == "1"
+    items = NotificationManager.get_user_notifications(
+        current_user.id,
+        unread_only=unread_only,
+        limit=50
+    )
+
+    return render_template(
+        "notifications.html",
+        notifications=items,
+        unread_count=NotificationManager.get_unread_count(current_user.id)
+    )
+
+
+@app.route("/notifications/<int:notification_id>/read", methods=["POST"])
+@login_required
+def mark_notification_read(notification_id):
+    NotificationManager.mark_as_read(notification_id)
+    return redirect(request.referrer or "/notifications")
+
+
+@app.route("/notifications/read-all", methods=["POST"])
+@login_required
+def mark_all_notifications_read():
+    NotificationManager.mark_all_as_read(current_user.id)
+    return redirect("/notifications")
+
+
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+@require_role("super_admin", "security_admin", "admin")
+def settings_page():
+    if request.method == "POST":
+        for key, setting in SystemSettings.get_all().items():
+            form_value = request.form.get(f"setting_{key}")
+            if form_value is None:
+                continue
+            set_setting(key, form_value, setting.get("type", "string"), setting.get("description", ""))
+
+        save_audit(current_user.username, "SETTINGS_UPDATE", "System settings updated.")
+        flash("Settings updated successfully.", "success")
+        return redirect("/settings")
+
+    return render_template(
+        "settings.html",
+        settings=SystemSettings.get_all()
+    )
+
+
+@app.route("/audit")
+@login_required
+@require_role("super_admin", "security_admin", "admin")
+def audit_logs():
+    search = request.args.get("search", "").strip()
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if search:
+            cursor.execute(
+                """
+                SELECT *
+                FROM audit_logs
+                WHERE username LIKE ?
+                   OR action LIKE ?
+                   OR details LIKE ?
+                ORDER BY log_time DESC
+                LIMIT 200
+                """,
+                (f"%{search}%", f"%{search}%", f"%{search}%")
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT *
+                FROM audit_logs
+                ORDER BY log_time DESC
+                LIMIT 200
+                """
+            )
+        records = cursor.fetchall()
+
+    return render_template(
+        "audit_logs.html",
+        records=records,
+        search=search
+    )
+
+
+@app.route("/backup", methods=["GET", "POST"])
+@login_required
+@require_role("super_admin", "security_admin", "admin")
+def backup_center():
+    message = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "create")
+
+        if action == "create":
+            backup_path = create_backup()
+            size_bytes = os.path.getsize(backup_path)
+            save_backup_log("database", backup_path, size_bytes, "success", current_user.username)
+            save_audit(current_user.username, "BACKUP_CREATE", backup_path)
+            create_notification(current_user.id, "Backup Created", f"Backup saved to {backup_path}", "success")
+            flash("Backup created successfully.", "success")
+            return redirect("/backup")
+
+        if action == "restore":
+            backup_name = request.form.get("backup_name", "").strip()
+            if not backup_name:
+                flash("Please choose a backup file.", "danger")
+                return redirect("/backup")
+
+            backup_path = os.path.join(BACKUP_DIR, backup_name)
+            try:
+                restore_backup(backup_path)
+                size_bytes = os.path.getsize(backup_path)
+                save_backup_log("database", backup_path, size_bytes, "restored", current_user.username, datetime.utcnow().isoformat())
+                save_audit(current_user.username, "BACKUP_RESTORE", backup_path)
+                flash("Backup restored successfully. Restart the app to reload the database file if needed.", "success")
+                return redirect("/backup")
+            except FileNotFoundError:
+                flash("Backup file not found.", "danger")
+
+    return render_template(
+        "backup.html",
+        backups=list_backups(),
+        backup_logs=get_backup_log_entries(),
+        backup_dir=BACKUP_DIR,
+        message=message
+    )
+
+
+@app.route("/api")
+@login_required
+def api_dashboard():
+    return render_template("api_dashboard.html")
+
+
+@app.route("/api/health")
+@login_required
+def api_health():
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        users_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM scan_history")
+        scans_count = cursor.fetchone()[0]
+
+    return jsonify({
+        "status": "ok",
+        "database": "postgresql" if is_postgres_enabled() else "sqlite",
+        "users": users_count,
+        "scans": scans_count,
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+
+
+@app.route("/api/scans")
+@login_required
+def api_scans():
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT scan_type, target, result, scan_date
+            FROM scan_history
+            ORDER BY scan_date DESC
+            LIMIT 25
+            """
+        )
+        records = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({"items": records})
+
+
+@app.route("/api/notifications")
+@login_required
+def api_notifications():
+    items = [item.to_dict() for item in NotificationManager.get_user_notifications(current_user.id, limit=25)]
+    return jsonify({"items": items})
+
+
+@app.route("/api/settings")
+@login_required
+@require_role("super_admin", "security_admin", "admin")
+def api_settings():
+    return jsonify(SystemSettings.get_all())
+
+
+@app.route("/email-alerts", methods=["GET", "POST"])
+@login_required
+@require_role("super_admin", "security_admin", "admin")
+def email_alerts_page():
+    result = None
+
+    if request.method == "POST":
+        smtp_server = request.form.get("smtp_server", "").strip()
+        smtp_port = request.form.get("smtp_port", "587").strip()
+        smtp_email = request.form.get("smtp_email", "").strip()
+        smtp_password = request.form.get("smtp_password", "")
+        recipients = [item.strip() for item in request.form.get("recipients", "").split(",") if item.strip()]
+        subject = request.form.get("subject", "Cyber Security Alert").strip()
+        body = request.form.get("body", "Test alert from Cyber Security Automation.").strip()
+
+        if smtp_server:
+            set_setting("smtp_server", smtp_server, "string", "Email server for alerts")
+        if smtp_port:
+            set_setting("smtp_port", smtp_port, "string", "Email server port")
+        if smtp_email:
+            set_setting("smtp_email", smtp_email, "string", "Email account for alerts")
+        if smtp_password:
+            set_setting("smtp_password", smtp_password, "string", "Email password")
+
+        if recipients:
+            result = send_email_alert(subject, body, recipients)
+            if result.get("sent"):
+                save_audit(current_user.username, "EMAIL_ALERT_SENT", subject)
+                create_notification(current_user.id, "Email Alert Sent", subject, "success")
+                flash("Email alert sent successfully.", "success")
+            else:
+                flash(result.get("reason", "Email alert could not be sent."), "warning")
+        else:
+            flash("Please provide at least one recipient.", "danger")
+
+    return render_template(
+        "email_alerts.html",
+        smtp_server=get_setting("smtp_server", "smtp.gmail.com"),
+        smtp_port=get_setting("smtp_port", "587"),
+        smtp_email=get_setting("smtp_email", ""),
+        email_enabled=get_setting("enable_email_alerts", "1"),
+        result=result
+    )
+
+
+@app.route("/nmap", methods=["GET", "POST"])
+@login_required
+def nmap_page():
+    result = None
+
+    if request.method == "POST":
+        target = request.form.get("target", "").strip()
+        if not target:
+            flash("Please enter a target host.", "danger")
+        else:
+            result = run_nmap_scan(target)
+            save_scan("NMAP", target, result)
+            save_audit(current_user.username, "NMAP_SCAN", target)
+            create_notification(current_user.id, "Nmap Scan Complete", f"Scan finished for {target}", "success")
+
+    return render_template("nmap_scanner.html", result=result)
+
+
+@app.route("/vulnerabilities", methods=["GET", "POST"])
+@login_required
+def vulnerability_page():
+    result = None
+
+    if request.method == "POST":
+        target = request.form.get("target", "").strip()
+        if not is_valid_host(target):
+            flash("Please enter a valid hostname or IP address.", "danger")
+        else:
+            open_ports = scan(target, 1, 1000)
+            result = scan_vulnerabilities(open_ports, target)
+            save_scan("VULNERABILITY", target, result)
+            save_audit(current_user.username, "VULNERABILITY_SCAN", target)
+            if any(item.get("severity") == "high" for item in result):
+                create_notification(current_user.id, "High Risk Vulnerability", f"High-risk exposure found on {target}", "danger")
+
+    return render_template("vulnerability_scanner.html", result=result)
+
+
+@app.route("/malware", methods=["GET", "POST"])
+@login_required
+def malware_page():
+    result = None
+
+    if request.method == "POST":
+        path_value = request.form.get("path", "").strip()
+        if not path_value or (not os.path.exists(path_value)):
+            flash("File not found or invalid path.", "danger")
+        else:
+            result = scan_malware_path(path_value)
+            save_scan("MALWARE", path_value, result)
+            save_audit(current_user.username, "MALWARE_SCAN", path_value)
+            if result.get("risk") == "high":
+                create_notification(current_user.id, "Malware Risk Detected", f"High-risk indicators found in {path_value}", "danger")
+
+    return render_template("malware_scanner.html", result=result)
+
+
+@app.route("/threat-intel", methods=["GET", "POST"])
+@login_required
+def threat_intel_page():
+    result = None
+
+    if request.method == "POST":
+        indicator = request.form.get("indicator", "").strip()
+        if not indicator:
+            flash("Please enter an IP, domain, or network indicator.", "danger")
+        else:
+            result = lookup_indicator(indicator)
+            save_scan("THREAT_INTEL", indicator, result)
+            save_audit(current_user.username, "THREAT_INTEL_LOOKUP", indicator)
+
+    return render_template("threat_intel.html", result=result)
+
+
+@app.route("/assistant", methods=["GET", "POST"])
+@login_required
+def assistant_page():
+    result = None
+    user_context = ""
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT scan_type, target, result
+            FROM scan_history
+            ORDER BY scan_date DESC
+            LIMIT 5
+            """
+        )
+        recent_scans = cursor.fetchall()
+
+    if request.method == "POST":
+        user_context = request.form.get("context", "").strip()
+        result = summarize_security_state(
+            scan_results={"recent_scans": [list(row) for row in recent_scans]},
+            vulnerability_results=[],
+            malware_results={},
+            threat_results={}
+        )
+        if user_context:
+            result["summary"] = f"{result['summary']} Context: {user_context}"
+        save_audit(current_user.username, "AI_ASSISTANT_QUERY", user_context or "general review")
+
+    return render_template(
+        "ai_assistant.html",
+        result=result,
+        recent_scans=recent_scans,
+        user_context=user_context
+    )
+
+
+@app.route("/deployment")
+@login_required
+def deployment_page():
+    return render_template("deployment.html")
 
 
 @app.route("/history")
@@ -1101,6 +2515,7 @@ def delete_user(user_id):
 @login_required
 def logout():
 
+    save_audit(current_user.username, "LOGOUT", "User logged out.")
     logout_user()
 
     return redirect("/login")

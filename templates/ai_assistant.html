@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}AI Security Assistant - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2>AI Security Assistant</h2>
+                <p class="text-muted">Generate pragmatic security guidance from the latest activity.</p>
+                <form method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Context</label>
+                        <textarea class="form-control" name="context" rows="6" placeholder="Describe what you want the assistant to review.">{{ user_context }}</textarea>
+                    </div>
+                    <button type="submit" class="btn btn-warning">Analyze</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h5>Assistant Response</h5>
+                {% if result %}
+                <p>{{ result.summary }}</p>
+                <ul>
+                    {% for item in result.recommendations %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted mb-0">Run an analysis to get recommendations.</p>
+                {% endif %}
+            </div>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5>Recent Scans</h5>
+                <ul class="list-group list-group-flush">
+                    {% for row in recent_scans %}
+                    <li class="list-group-item">
+                        <strong>{{ row[0] }}</strong> - {{ row[1] }}
+                    </li>
+                    {% else %}
+                    <li class="list-group-item text-muted">No recent scans available.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

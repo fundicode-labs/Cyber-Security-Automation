@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}REST API - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <h2 class="card-title">REST API</h2>
+        <p class="text-muted">JSON endpoints for integrations and automation.</p>
+        <div class="table-responsive">
+            <table class="table table-striped mb-0">
+                <thead>
+                    <tr>
+                        <th>Endpoint</th>
+                        <th>Method</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>/api/health</td><td>GET</td><td>System health and counts</td></tr>
+                    <tr><td>/api/scans</td><td>GET</td><td>Recent scan history</td></tr>
+                    <tr><td>/api/notifications</td><td>GET</td><td>Current user notifications</td></tr>
+                    <tr><td>/api/settings</td><td>GET</td><td>System settings snapshot</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Payments - {{ _('Cyber Security Automation') }}{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <p class="text-muted mb-1">Total Records</p>
+                <h3 class="mb-0">{{ stats.total_count }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <p class="text-muted mb-1">Pending</p>
+                <h3 class="mb-0 text-warning">{{ stats.pending_count }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <p class="text-muted mb-1">Paid</p>
+                <h3 class="mb-0 text-success">{{ stats.paid_count }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body">
+                <p class="text-muted mb-1">Paid Amount by Currency</p>
+                <h6 class="mb-1">USD {{ "%.2f"|format(stats.paid_usd) }}</h6>
+                <h6 class="mb-0">EUR {{ "%.2f"|format(stats.paid_eur) }}</h6>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="card-title mb-0">Create Payment</h5>
+                    {% if user_can('payments.approve') %}
+                    <a href="/payments/gateway-health" class="btn btn-sm btn-outline-dark">Gateway Health</a>
+                    {% endif %}
+                </div>
+                <form method="post" action="/payments">
+                    <div class="mb-3">
+                        <label class="form-label">Plan</label>
+                        <input type="text" class="form-control" name="plan_name" value="Monthly Subscription" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Amount</label>
+                        <input type="number" class="form-control" name="amount" min="1" step="0.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Currency</label>
+                        <select class="form-select" name="currency" required>
+                            <option value="USD">USD (Dollar)</option>
+                            <option value="EUR">EUR (Euro)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Payment Method</label>
+                        <select class="form-select" name="payment_method" required>
+                            <option value="mixbyyas">Mix by YAS</option>
+                            <option value="halopesa">HaloPesa</option>
+                            <option value="card">Card</option>
+                            <option value="bank">Bank Transfer</option>
+                            <option value="cash">Cash</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Phone Number (for Mix by YAS/HaloPesa)</label>
+                        <input type="text" class="form-control" name="phone_number" placeholder="2557XXXXXXXX">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-control" name="notes" rows="3" placeholder="Optional notes"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Save Payment</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="card-title mb-0">Payment History</h5>
+                    <span class="badge bg-secondary">{{ records|length }} items</span>
+                </div>
+                <div class="table-responsive table-soft p-2">
+                    <table class="table table-striped table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Reference</th>
+                                {% if can_manage %}<th>User</th>{% endif %}
+                                <th>Plan</th>
+                                <th>Method</th>
+                                <th>Amount</th>
+                                <th>Status</th>
+                                <th>Date</th>
+                                <th>Invoice</th>
+                                {% if user_can('payments.approve') %}<th>Action</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in records %}
+                            <tr>
+                                <td class="small">{{ item.reference }}</td>
+                                {% if can_manage %}<td>{{ item.username or 'Unknown' }}</td>{% endif %}
+                                <td>{{ item.plan_name }}</td>
+                                <td class="text-capitalize">{{ item.payment_method }}</td>
+                                <td>{{ "%.2f"|format(item.amount) }} {{ item.currency }}</td>
+                                <td>
+                                    {% if item.status == 'paid' %}
+                                    <span class="badge bg-success">Paid</span>
+                                    {% elif item.status == 'pending' %}
+                                    <span class="badge bg-warning text-dark">Pending</span>
+                                    {% elif item.status == 'failed' %}
+                                    <span class="badge bg-danger">Failed</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary text-uppercase">{{ item.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="small">{{ item.created_at }}</td>
+                                <td>
+                                    <a href="/payments/{{ item.id }}/invoice" class="btn btn-sm btn-outline-secondary">PDF</a>
+                                </td>
+                                {% if user_can('payments.approve') %}
+                                <td>
+                                    <form method="post" action="/payments/{{ item.id }}/status" class="d-flex gap-2">
+                                        <select class="form-select form-select-sm" name="status">
+                                            <option value="pending" {% if item.status == 'pending' %}selected{% endif %}>Pending</option>
+                                            <option value="paid" {% if item.status == 'paid' %}selected{% endif %}>Paid</option>
+                                            <option value="failed" {% if item.status == 'failed' %}selected{% endif %}>Failed</option>
+                                            <option value="cancelled" {% if item.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                                        </select>
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">Update</button>
+                                    </form>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="9" class="text-center text-muted py-4">No payment records found.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - DATABASE_URL=postgresql://csa:csa_password@db:5432/csa
+      - SMTP_SERVER=
+      - SMTP_PORT=587
+      - SMTP_EMAIL=
+      - SMTP_PASSWORD=
+    depends_on:
+      - db
+    volumes:
+      - .:/app
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: csa
+      POSTGRES_USER: csa
+      POSTGRES_PASSWORD: csa_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
